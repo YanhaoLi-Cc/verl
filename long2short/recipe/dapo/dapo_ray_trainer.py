@@ -138,6 +138,9 @@ class RayDAPOTrainer(RayPPOTrainer):
         batch = None
         num_prompt_in_batch = 0
         num_gen_batches = 0
+
+        #breakpoint()
+
         for epoch in range(self.config.trainer.total_epochs):
             for batch_dict in self.train_dataloader:
                 metrics = {}
@@ -228,16 +231,16 @@ class RayDAPOTrainer(RayPPOTrainer):
                         if reward_extra_infos_dict:
                             # Ensure the extra info arrays match the number of trajectories
                             num_trajectories = len(new_batch.non_tensor_batch["uid"])
-                            print(f"\033[94m[Reward Extra Info] Expected trajectory count: {num_trajectories}\033[0m")
+                            #print(f"\033[94m[Reward Extra Info] Expected trajectory count: {num_trajectories}\033[0m")
                             
                             for k, v in reward_extra_infos_dict.items():
                                 arr = np.array(v)
-                                print(f"\033[96m  - Metric '{k}': shape={arr.shape}, len={len(arr)}\033[0m")
+                                #print(f"\033[96m  - Metric '{k}': shape={arr.shape}, len={len(arr)}\033[0m")
                                 
                                 # Check if array length matches trajectory count
                                 if len(arr) == num_trajectories:
                                     new_batch.non_tensor_batch[k] = arr
-                                    print(f"\033[92m    ✓ Added to non_tensor_batch\033[0m")
+                                    #print(f"\033[92m    ✓ Added to non_tensor_batch\033[0m")
                                 else:
                                     print(f"\033[93m    ✗ Warning: Length mismatch ({len(arr)} != {num_trajectories}). Skipping.\033[0m")
 
@@ -259,20 +262,20 @@ class RayDAPOTrainer(RayPPOTrainer):
                             # Add constraint info to batch
                             if "reward_extra_info" in constraint_result:
                                 num_trajectories = len(new_batch.non_tensor_batch["uid"])
-                                print(f"\033[95m[Constraint Extra Info] Expected trajectory count: {num_trajectories}\033[0m")
+                                #print(f"\033[95m[Constraint Extra Info] Expected trajectory count: {num_trajectories}\033[0m")
                                 
                                 for key, value in constraint_result["reward_extra_info"].items():
                                     arr = np.array(value).reshape(-1)
-                                    print(f"\033[35m  - Constraint '{key}': shape={arr.shape}, len={len(arr)}\033[0m")
+                                    #print(f"\033[35m  - Constraint '{key}': shape={arr.shape}, len={len(arr)}\033[0m")
                                     
                                     # For per-trajectory data (like response_lengths, constraint_violations)
                                     if key in ["response_lengths", "constraint_violations"] and len(arr) == num_trajectories:
                                         new_batch.non_tensor_batch[f"constraint_{key}"] = arr
-                                        print(f"\033[92m    ✓ Added as per-trajectory data\033[0m")
+                                        #print(f"\033[92m    ✓ Added as per-trajectory data\033[0m")
                                     # For scalar metrics, broadcast to all trajectories
                                     elif len(arr) == 1:
                                         new_batch.non_tensor_batch[f"constraint_{key}"] = np.full(num_trajectories, arr[0])
-                                        print(f"\033[92m    ✓ Broadcasted scalar to all trajectories\033[0m")
+                                        #print(f"\033[92m    ✓ Broadcasted scalar to all trajectories\033[0m")
                                     else:
                                         # Skip if length doesn't match
                                         print(f"\033[91m    ✗ Unexpected shape. Skipping.\033[0m")
