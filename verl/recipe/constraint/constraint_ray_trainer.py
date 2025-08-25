@@ -34,6 +34,7 @@ from verl.trainer.ppo.metric_utils import (
     reduce_metrics,
 )
 from verl.trainer.ppo.ray_trainer import AdvantageEstimator, RayPPOTrainer, _timer, apply_kl_penalty, compute_advantage, compute_response_mask
+from verl.protocol import pad_dataproto_to_divisor, unpad_dataproto
 
 
 class RayConstraintTrainer(RayPPOTrainer):
@@ -71,6 +72,81 @@ class RayConstraintTrainer(RayPPOTrainer):
             )
             if self.constraint_manager is not None:
                 print("\033[91mLoad ConstrainedRewardManager Successful\033[0m")
+
+    def _validate(self):
+        print("Validation: Generation Begin.")
+        
+        reward_acc_lst = []
+        data_source_lst = []
+        length_lst = []
+
+        for test_data in tqdm(self.val_dataloader):
+            test_batch = DataProto.from_single_dict(test_data)
+            # test_batch = test_batch.to('cuda')
+
+            # we only do validation on rule-based rm
+            if self.config.reward_model.enable and test_batch[0].non_tensor_batch['reward_model']['style'] == 'model':
+                return {}
+
+            n_val_samples = self.config.actor_rollout_ref.rollout.val_kwargs.n
+            test_batch = test_batch.repeat(repeat_times=n_val_samples, interleave=True)
+            test_gen_batch = test_batch.pop(['input_ids', 'attention_mask', 'position_ids'])
+            test_gen_batch.meta_info = {
+                "eos_token_id": self.tokenizer.eos_token_id,
+                "pad_token_id": self.tokenizer.pad_token_id,
+                "recompute_log_prob": False,
+                "do_sample": self.config.actor_rollout_ref.rollout.val_kwargs.do_sample,
+                "validate": True,
+            }
+
+            # pad to be divisible by dp_size
+            test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
+            test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
+            # unpad
+            test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
+
+            test_batch = test_batch.union(test_output_gen_batch)
+            # evaluate using reward_function
+            # for certain reward function (e.g. sandbox), the generation can overlap with reward
+            reward_result = self.val_reward_fn(test_batch, return_dict=True)
+            reward_acc = reward_result["reward_extra_info"]["acc"]
+
+            # obtain response length
+            def obtain_reponse_length(output_batch):
+                prompt_length = output_batch.batch['prompts'].shape[-1]
+                response_length = output_batch.batch['attention_mask'][:,prompt_length:].sum(1).numpy()
+                return response_length
+            
+            length_lst.append(obtain_reponse_length(test_output_gen_batch))
+            reward_acc_lst.append(reward_acc)
+            data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * len(reward_acc)))
+
+        print('Validation: Generation end.')
+
+        reward_acc = np.concatenate(reward_acc_lst, axis=0) # (batch_size,)
+        data_sources = np.concatenate(data_source_lst, axis=0)
+        lengths = np.concatenate(length_lst, axis=0)
+        # evaluate test_score based on data source
+        data_source_reward = {}
+        data_source_response_lengths = {}
+        for i in range(len(reward_acc)):
+            data_source = data_sources[i]
+            if data_source not in data_source_reward:
+                data_source_reward[data_source] = []
+            data_source_reward[data_source].append(reward_acc[i])
+
+            if data_source not in data_source_response_lengths:
+                data_source_response_lengths[data_source] = []
+            data_source_response_lengths[data_source].append(lengths[i])
+
+        metric_dict = {}
+        for data_source, rewards in data_source_reward.items():
+            metric_dict[f'val/test_score/{data_source}'] = np.mean(rewards)
+
+        for data_source, lengths in data_source_response_lengths.items():
+            metric_dict[f'val/test_length/{data_source}'] = np.mean(lengths)
+
+        return metric_dict
 
     def fit(self):
         """
