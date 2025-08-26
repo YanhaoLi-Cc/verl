@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import os
 from typing import Dict, Optional, Union
 from verl import DataProto
 
@@ -418,10 +419,10 @@ class ConstraintRewardManager:
         """
         if not os.path.exists(file_path):
             print(f"\033[93m⚠️ [WARNING] Checkpoint file not found at {file_path}. Starting with a fresh state.\033[0m")
-            return
+            exit()
 
         try:
-            state_dict = torch.load(file_path, map_location='cpu')
+            state_dict = torch.load(file_path, map_location='cpu', weights_only=False)
             
             # Restore core state variables using .get() for safety
             self.lagrange_multiplier = state_dict.get('lagrange_multiplier', self.lagrange_multiplier)
@@ -446,5 +447,6 @@ class ConstraintRewardManager:
             print(f"  - Resumed EMA Violation: {self.ema_constraint_violation:.4f}")
 
         except Exception as e:
-            print(f"\033[91m❌ Error loading ConstraintRewardManager state from {file_path}: {e}. Starting fresh.\033[0m")
+            print(f"\033[91m❌ Error loading ConstraintRewardManager state from {file_path}: {e}. \033[0m")
+            raise RuntimeError(f"Failed to load ConstraintRewardManager state from {file_path}: {e}")
         

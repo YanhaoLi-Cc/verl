@@ -15,7 +15,7 @@
 FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
-
+import os
 import uuid
 from collections import defaultdict
 from copy import deepcopy
@@ -177,7 +177,8 @@ class RayConstraintTrainer(RayPPOTrainer):
 
         # load checkpoint before doing anything
         self._load_checkpoint()
-        self.constraint_manager.load_state(os.path.join(self.default_local_dir,"latest_constraint_manager_state.pt"))
+        if self.global_steps != 0:
+            self.constraint_manager.load_state(os.path.join(self.config.trainer.default_local_dir,"latest_constraint_manager_state.pt"))
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
@@ -423,7 +424,7 @@ class RayConstraintTrainer(RayPPOTrainer):
                     if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
                         with _timer("save_checkpoint", timing_raw):
                             self._save_checkpoint()
-                            self.constraint_manager.save_state(os.path.join(self.default_local_dir,"latest_constraint_manager_state.pt"))
+                            self.constraint_manager.save_state(os.path.join(self.config.trainer.default_local_dir,"latest_constraint_manager_state.pt"))
 
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
