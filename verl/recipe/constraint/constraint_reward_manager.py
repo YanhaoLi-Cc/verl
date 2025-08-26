@@ -377,3 +377,74 @@ class ConstraintRewardManager:
             summary_parts.append(f"EMA Violation Ratio: {metrics['constraint/ema_violation_ratio']:.3f}")
             
         return " | ".join(summary_parts)
+
+
+    def save_state(self, file_path: str):
+        """
+        Saves the current state of the manager to a file for checkpointing.
+
+        Args:
+            file_path (str): The path to the file where the state will be saved.
+        """
+        # Ensure the directory exists
+        dir_name = os.path.dirname(file_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+            
+        state_dict = {
+            'lagrange_multiplier': self.lagrange_multiplier,
+            'ema_constraint_violation': self.ema_constraint_violation,
+            'lambda_momentum': self.lambda_momentum,
+            'tolerance': self.tolerance,  # Important if using adaptive tolerance
+            'length_history': self.length_history,
+            'penalty_history': self.penalty_history,
+            'violation_history': self.violation_history,
+            'lambda_history': self.lambda_history,
+            'stats': self.stats, # Save full stats for continuous logging
+        }
+        
+        try:
+            torch.save(state_dict, file_path)
+            print(f"\033[92m✅ ConstraintRewardManager state saved to {file_path}\033[0m")
+        except Exception as e:
+            print(f"\033[91m❌ Error saving ConstraintRewardManager state: {e}\033[0m")
+
+    def load_state(self, file_path: str):
+        """
+        Loads the state of the manager from a file to resume training.
+
+        Args:
+            file_path (str): The path to the file from which to load the state.
+        """
+        if not os.path.exists(file_path):
+            print(f"\033[93m⚠️ [WARNING] Checkpoint file not found at {file_path}. Starting with a fresh state.\033[0m")
+            return
+
+        try:
+            state_dict = torch.load(file_path, map_location='cpu')
+            
+            # Restore core state variables using .get() for safety
+            self.lagrange_multiplier = state_dict.get('lagrange_multiplier', self.lagrange_multiplier)
+            self.ema_constraint_violation = state_dict.get('ema_constraint_violation', self.ema_constraint_violation)
+            self.lambda_momentum = state_dict.get('lambda_momentum', self.lambda_momentum)
+            self.tolerance = state_dict.get('tolerance', self.tolerance)
+            
+            # Restore history lists
+            self.length_history = state_dict.get('length_history', [])
+            self.penalty_history = state_dict.get('penalty_history', [])
+            self.violation_history = state_dict.get('violation_history', [])
+            self.lambda_history = state_dict.get('lambda_history', [])
+            
+            # Restore stats dictionary for complete historical data
+            loaded_stats = state_dict.get('stats', {})
+            for key in self.stats:
+                if key in loaded_stats:
+                    self.stats[key] = loaded_stats[key]
+
+            print(f"\033[92m✅ ConstraintRewardManager state loaded from {file_path}\033[0m")
+            print(f"  - Resumed λ: {self.lagrange_multiplier:.4f}")
+            print(f"  - Resumed EMA Violation: {self.ema_constraint_violation:.4f}")
+
+        except Exception as e:
+            print(f"\033[91m❌ Error loading ConstraintRewardManager state from {file_path}: {e}. Starting fresh.\033[0m")
+        

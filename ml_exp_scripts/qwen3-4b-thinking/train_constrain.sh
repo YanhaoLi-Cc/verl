@@ -29,9 +29,9 @@ loss_agg_mode="token-mean"
 # Adjusted batch sizes for single node 8 GPUs
 train_prompt_bsz=64 # Reduced from 512 to 64 for single node
 gen_prompt_bsz=64
-val_prompt_bsz=32
+val_prompt_bsz=64
 n_resp_per_prompt=8
-train_prompt_mini_bsz=32  # Reduced from 32 to 8
+train_prompt_mini_bsz=32
 filter_groups_enable=False
 filter_groups_metric=acc
 max_num_gen_batches=5
@@ -50,7 +50,7 @@ val_top_p=0.95
 val_top_k=-1
 
 # Performance Related Parameter - Adjusted for single node
-sp_size=4
+sp_size=1
 actor_ppo_max_token_len=34816
 infer_ppo_max_token_len=48000
 offload=True
@@ -74,9 +74,9 @@ olympiad_bench=./dataset/test_data/valid.olympiad_bench.parquet
 # actor_rollout_ref.rollout.max_num_seqs
 # actor_rollout_ref.rollout.max_num_seqs=128 \
 
-python -m recipe.dapo.main_dapo \
+python -m recipe.constraint.main_dapo \
     data.train_files="${TRAIN_FILES}" \
-    data.val_files='['$aime24']' \
+    data.val_files='['$aime24','$aime25','$hmmt25']' \
     data.prompt_key=prompt \
     data.truncation='left' \
     data.max_prompt_length=${max_prompt_length} \
@@ -107,7 +107,7 @@ python -m recipe.dapo.main_dapo \
     actor_rollout_ref.actor.clip_ratio_high=${clip_ratio_high} \
     actor_rollout_ref.actor.clip_ratio_c=10.0 \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size=${sp_size} \
-    actor_rollout_ref.actor.use_dynamic_bsz=False \
+    actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${actor_ppo_max_token_len} \
     actor_rollout_ref.actor.optim.lr=1e-6 \
@@ -130,13 +130,13 @@ python -m recipe.dapo.main_dapo \
     actor_rollout_ref.rollout.top_p=${top_p} \
     actor_rollout_ref.rollout.top_k=${top_k} \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
-    actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=False \
+    actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=${infer_ppo_max_token_len} \
     actor_rollout_ref.rollout.val_kwargs.temperature=${val_temperature} \
     actor_rollout_ref.rollout.val_kwargs.top_p=${val_top_p} \
     actor_rollout_ref.rollout.val_kwargs.top_k=${val_top_k} \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
-    actor_rollout_ref.rollout.val_kwargs.n=8 \
+    actor_rollout_ref.rollout.val_kwargs.n=4 \
     actor_rollout_ref.ref.fsdp_config.param_offload=${offload} \
     actor_rollout_ref.ref.ulysses_sequence_parallel_size=${sp_size} \
     actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True \
@@ -155,9 +155,9 @@ python -m recipe.dapo.main_dapo \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=4 \
     trainer.val_before_train=True \
-    trainer.test_freq=-1 \
+    trainer.test_freq=10 \
     trainer.save_freq=10 \
-    trainer.total_epochs=10 \
+    trainer.total_epochs=5 \
     trainer.total_training_steps=200 \
     trainer.default_local_dir="${CKPTS_DIR}" \
     trainer.resume_mode=auto \

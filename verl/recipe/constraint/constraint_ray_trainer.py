@@ -140,11 +140,18 @@ class RayConstraintTrainer(RayPPOTrainer):
             data_source_response_lengths[data_source].append(lengths[i])
 
         metric_dict = {}
+        test_score_vals = []
+        test_length_vals = []
         for data_source, rewards in data_source_reward.items():
             metric_dict[f'val/test_score/{data_source}'] = np.mean(rewards)
+            test_score_vals.append(np.mean(rewards))
 
         for data_source, lengths in data_source_response_lengths.items():
             metric_dict[f'val/test_length/{data_source}'] = np.mean(lengths)
+            test_length_vals.append(np.mean(lengths))
+
+        metric_dict['result/avg_acc'] = np.mean(test_score_vals)
+        metric_dict['result/avg_len'] = np.mean(test_length_vals)
 
         return metric_dict
 
@@ -170,6 +177,7 @@ class RayConstraintTrainer(RayPPOTrainer):
 
         # load checkpoint before doing anything
         self._load_checkpoint()
+        self.constraint_manager.load_state(os.path.join(self.default_local_dir,"latest_constraint_manager_state.pt"))
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
@@ -415,6 +423,7 @@ class RayConstraintTrainer(RayPPOTrainer):
                     if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
                         with _timer("save_checkpoint", timing_raw):
                             self._save_checkpoint()
+                            self.constraint_manager.save_state(os.path.join(self.default_local_dir,"latest_constraint_manager_state.pt"))
 
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
