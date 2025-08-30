@@ -80,7 +80,7 @@ class RayConstraintTrainer(RayPPOTrainer):
         data_source_lst = []
         length_lst = []
 
-        for test_data in tqdm(self.val_dataloader):
+        for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
             # test_batch = test_batch.to('cuda')
 
@@ -177,8 +177,8 @@ class RayConstraintTrainer(RayPPOTrainer):
 
         # load checkpoint before doing anything
         self._load_checkpoint()
-        if self.global_steps != 0:
-            self.constraint_manager.load_state(os.path.join(self.config.trainer.default_local_dir,"latest_constraint_manager_state.pt"))
+        if self.global_steps != 0 and self.use_constraints:
+            self.constraint_manager.load_state(os.path.join(self.config.trainer.default_local_dir,f"{self.global_steps}_constraint_manager_state.pt"))
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
@@ -421,10 +421,12 @@ class RayConstraintTrainer(RayPPOTrainer):
                                 last_val_metrics = val_metrics
                         metrics.update(val_metrics)
 
-                    if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
+                    if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0 or self.global_steps % 10 == 9):
                         with _timer("save_checkpoint", timing_raw):
                             self._save_checkpoint()
-                            self.constraint_manager.save_state(os.path.join(self.config.trainer.default_local_dir,"latest_constraint_manager_state.pt"))
+
+                            if self.use_constraints:                            
+                                self.constraint_manager.save_state(os.path.join(self.config.trainer.default_local_dir,f"{self.global_steps}_constraint_manager_state.pt"))
 
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
