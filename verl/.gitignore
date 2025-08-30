@@ -1,5 +1,4 @@
 
-exp_scripts/
 **/*.pt
 **/checkpoints
 **/wget-log
@@ -59,8 +58,6 @@ nosetests.xml
 coverage.xml
 *,cover
 .hypothesis/
-pytest.ini
-output.txt
 
 # Translations
 *.mo
@@ -127,4 +124,3 @@ logs
 log
 outputs
 .history
-train_results/
