@@ -1,4 +1,5 @@
 
+exp_scripts/
 **/*.pt
 **/checkpoints
 **/wget-log
