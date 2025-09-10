@@ -165,9 +165,11 @@ class ConstraintRewardManager:
             # Apply penalty at the last token of the response
             # Formula: $\tilde{r}_T = r_T - \lambda \cdot (\frac{|y|}{L_{target}} - 1)$
             if valid_response_length > 0:
-                penalty = self.lagrange_multiplier * violation_ratio
+                # penalty = self.lagrange_multiplier * violation_ratio
+                penalty = max(0, self.lagrange_multiplier * violation_ratio)
                 reward_tensor[i, valid_response_length - 1] -= penalty
-                total_penalty += abs(penalty)
+                # total_penalty += abs(penalty)
+                total_penalty += penalty
                 
         # Clip reward tensor to prevent extreme values
         # This helps maintain training stability
