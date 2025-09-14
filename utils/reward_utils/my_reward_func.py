@@ -130,7 +130,7 @@ def my_reward_func(data_source, solution_str, ground_truth, extra_info) -> float
         mathv_correct = False
 
     acc = omi_correct or mathv_correct
-    score = 1.0 if acc else -1.0
+    score = 1.0 if acc else 0.0
 
     return {
         "score": score,
@@ -182,7 +182,7 @@ def my_reward_func_with_timeout(data_source, solution_str, ground_truth, extra_i
 
 
     acc = omi_correct or mathv_correct
-    score = 1.0 if acc else -1.0
+    score = 1.0 if acc else 0.0
 
     return {
         "score": score,
@@ -193,6 +193,71 @@ def my_reward_func_with_timeout(data_source, solution_str, ground_truth, extra_i
             "mathv_correct": mathv_correct
         }
     }
+
+import signal
+
+class TimeoutException(Exception):
+    pass
+
+def _handle_timeout(signum, frame):
+    raise TimeoutException("Function call timed out")
+
+# 将超时逻辑封装成一个上下文管理器，更易于使用
+from contextlib import contextmanager
+
+@contextmanager
+def time_limit(seconds):
+    # 注册信号处理函数
+    signal.signal(signal.SIGALRM, _handle_timeout)
+    # 设置警报
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        # 函数执行完毕后，取消警报
+        signal.alarm(0)
+
+# --- 如何在你的 reward 函数中使用 ---
+
+def reward_func_signal(data_source, solution_str, ground_truth, extra_info=None, timeout_seconds=8):
+    # 注意：这个 timeout_seconds 是总超时
+    try:
+        with time_limit(timeout_seconds):
+            # --- OMI check ---
+            omi_pred = extract_answer(solution_str, extract_from_boxed=True)
+            omi_correct = math_equal(omi_pred, ground_truth, check_antlr_version=False) if omi_pred is not None else False
+
+            # --- MathVerify check ---
+            mathv_pred = parse(solution_str)
+            if mathv_pred is None:
+                mathv_correct = False
+            else:
+                gold_boxed = parse(f"\\boxed{{{ground_truth}}}")
+                mathv_correct = verify(gold_boxed, mathv_pred) if gold_boxed is not None else False
+    
+    except TimeoutException as e:
+        print(f"整个 reward function 超时 (>{timeout_seconds}s): {e}")
+        # 超时后，你可以选择给一个默认的惩罚分数
+        omi_correct = False
+        mathv_correct = False
+    except Exception as e:
+        print(f"Reward function 内部发生异常: {e}")
+        omi_correct = False
+        mathv_correct = False
+
+    acc = omi_correct or mathv_correct
+    score = float(acc)
+    return {
+        "score": score,
+        "acc": acc,
+        "details": {
+            "omi_correct": omi_correct,
+            "mathv_correct": mathv_correct
+        }
+    }
+
+
+
 
 if __name__ == "__main__":
     print(my_reward_func("_", "asdada\\boxed{3/2}", "1.50", None))
