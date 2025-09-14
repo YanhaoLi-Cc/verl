@@ -130,7 +130,7 @@ def my_reward_func(data_source, solution_str, ground_truth, extra_info) -> float
         mathv_correct = False
 
     acc = omi_correct or mathv_correct
-    score = 1.0 if acc else 0.0
+    score = 1.0 if acc else -1.0
 
     return {
         "score": score,
@@ -182,7 +182,7 @@ def my_reward_func_with_timeout(data_source, solution_str, ground_truth, extra_i
 
 
     acc = omi_correct or mathv_correct
-    score = 1.0 if acc else 0.0
+    score = 1.0 if acc else -1.0
 
     return {
         "score": score,
@@ -237,7 +237,6 @@ def reward_func_signal(data_source, solution_str, ground_truth, extra_info=None,
     
     except TimeoutException as e:
         print(f"整个 reward function 超时 (>{timeout_seconds}s): {e}")
-        # 超时后，你可以选择给一个默认的惩罚分数
         omi_correct = False
         mathv_correct = False
     except Exception as e:
@@ -246,7 +245,7 @@ def reward_func_signal(data_source, solution_str, ground_truth, extra_info=None,
         mathv_correct = False
 
     acc = omi_correct or mathv_correct
-    score = float(acc)
+    score = 1.0 if acc else -1.0
     return {
         "score": score,
         "acc": acc,
@@ -255,8 +254,6 @@ def reward_func_signal(data_source, solution_str, ground_truth, extra_info=None,
             "mathv_correct": mathv_correct
         }
     }
-
-
 
 
 if __name__ == "__main__":
