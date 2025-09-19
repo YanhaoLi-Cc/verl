@@ -3,7 +3,7 @@ set -x
 # Set XFormers backend to avoid CUDA errors
 # export VLLM_ATTENTION_BACKEND=XFORMERS
 
-export MODEL_PATH=/jizhicfs/hymiezhao/models/Qwen3-4B-Thinking-2507
+export MODEL_PATH=/data/malu/Qwen2.5-0.5B-Instruct
 export DATA_DIR=./dataset
 
 export EXP_NAME=eval
@@ -29,7 +29,7 @@ clip_ratio_high=0.28
 # Length settings - targeting 4k from 10k
 max_prompt_length=1024
 # Increased to 32k response with 64k context window
-max_response_length=32768
+max_response_length=1024
 
 enable_overlong_buffer=False
 overlong_buffer_len=$((1024 * 4))
@@ -38,19 +38,19 @@ overlong_penalty_factor=1.0
 loss_agg_mode="token-mean"
 
 # Adjusted batch sizes for single node 8 GPUs
-train_prompt_bsz=64 # Reduced from 512 to 64 for single node
-gen_prompt_bsz=64
-val_prompt_bsz=64
+train_prompt_bsz=4 # Reduced from 512 to 64 for single node
+gen_prompt_bsz=4
+val_prompt_bsz=4
 n_resp_per_prompt=8
-train_prompt_mini_bsz=32
+train_prompt_mini_bsz=4
 filter_groups_enable=False
 filter_groups_metric=acc
 max_num_gen_batches=5
 
 # Paths
-MODEL_PATH=${MODEL_PATH:-"/jizhicfs/hymiezhao/models/Qwen3-4B-Thinking-2507"}
+MODEL_PATH=${MODEL_PATH:-"/data/malu/Qwen2.5-0.5B-Instruct"}
 CKPTS_DIR=${CKPTS_DIR:-"./train_results/${project_name}/${exp_name}"}
-TRAIN_FILES="['./dataset/train_data/4k_high_quality_deepmath.parquet']"
+TRAIN_FILES="['./dataset/test_data/valid.aime24.parquet']"
 
 # Algorithm
 temperature=1.0
@@ -59,8 +59,8 @@ top_k=-1
 
 # Performance Related Parameter - Adjusted for single node
 sp_size=1
-actor_ppo_max_token_len=34816
-infer_ppo_max_token_len=48000
+actor_ppo_max_token_len=2048
+infer_ppo_max_token_len=2048
 offload=True
 fsdp_size=-1
 
@@ -75,10 +75,6 @@ constraint_type="average"
 
 aime24=./dataset/test_data/valid.aime24.parquet
 aime25=./dataset/test_data/valid.aime25.parquet
-hmmt25=./dataset/test_data/valid.hmmt25.parquet
-gpqa=./dataset/test_data/valid.gpqa.parquet
-olympiad_bench=./dataset/test_data/valid.olympiad_bench.parquet
-
 val_temperature=0.6
 val_top_p=0.95
 val_top_k=-1
@@ -86,11 +82,14 @@ val_top_k=-1
 # actor_rollout_ref.rollout.max_num_seqs
 # actor_rollout_ref.rollout.max_num_seqs=128 \
 
-python -m recipe.constraint.main_dapo \
-    trainer.val_before_train=True \
-    +trainer.val_only=True \
+ray stop
+CUDA_VISIBLE_DEVICES=4 ray start --head --include-dashboard=true --num-cpus=50 --num-gpus=1
+
+CUDA_VISIBLE_DEVICES=4 python -m recipe.constraint.main_dapo \
     +trainer.val_save_path="./eval_results.json" \
-    data.val_files='['$aime24','$aime25','$hmmt25','$gpqa','$olympiad_bench']' \
+    +trainer.val_only=True \
+    trainer.val_before_train=True \
+    data.val_files='['$aime24','$aime25']' \
     data.val_batch_size=${val_prompt_bsz} \
     data.prompt_key=prompt \
     data.truncation='left' \
@@ -141,10 +140,7 @@ python -m recipe.constraint.main_dapo \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.n=${n_resp_per_prompt} \
     actor_rollout_ref.rollout.max_num_batched_tokens=${infer_ppo_max_token_len} \
-    actor_rollout_ref.rollout.enforce_eager=False \
-    actor_rollout_ref.rollout.free_cache_engine=False \
-    actor_rollout_ref.rollout.enable_chunked_prefill=True \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.9 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.95 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.temperature=${temperature} \
     actor_rollout_ref.rollout.top_p=${top_p} \
@@ -164,11 +160,11 @@ python -m recipe.constraint.main_dapo \
     +reward_model.reward_kwargs.overlong_buffer_cfg.penalty_factor=1.0 \
     +reward_model.reward_kwargs.overlong_buffer_cfg.log=False \
     +reward_model.reward_kwargs.max_resp_len=${max_response_length} \
-    trainer.logger='["console","wandb"]' \
+    trainer.logger='["console"]' \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
-    trainer.n_gpus_per_node=8 \
-    trainer.nnodes=4 \
+    trainer.n_gpus_per_node=1 \
+    trainer.nnodes=1 \
     trainer.test_freq=10 \
     trainer.save_freq=10 \
     trainer.total_epochs=5 \
