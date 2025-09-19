@@ -79,6 +79,8 @@ hmmt25=./dataset/test_data/valid.hmmt25.parquet
 gpqa=./dataset/test_data/valid.gpqa.parquet
 olympiad_bench=./dataset/test_data/valid.olympiad_bench.parquet
 
+all=./dataset/test_data/combined.parquet
+
 val_temperature=0.6
 val_top_p=0.95
 val_top_k=-1
@@ -87,10 +89,10 @@ val_top_k=-1
 # actor_rollout_ref.rollout.max_num_seqs=128 \
 
 python -m recipe.constraint.main_dapo \
-    trainer.val_before_train=True \
-    +trainer.val_only=True \
     +trainer.val_save_path="./eval_results.json" \
-    data.val_files='['$aime24','$aime25','$hmmt25','$gpqa','$olympiad_bench']' \
+    +trainer.val_only=True \
+    trainer.val_before_train=True \
+    data.val_files='['$all']' \
     data.val_batch_size=${val_prompt_bsz} \
     data.prompt_key=prompt \
     data.truncation='left' \
@@ -100,7 +102,7 @@ python -m recipe.constraint.main_dapo \
     actor_rollout_ref.rollout.val_kwargs.top_p=${val_top_p} \
     actor_rollout_ref.rollout.val_kwargs.top_k=${val_top_k} \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
-    actor_rollout_ref.rollout.val_kwargs.n=4 \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
     data.train_files="${TRAIN_FILES}" \
     data.gen_batch_size=${gen_prompt_bsz} \
     data.train_batch_size=${train_prompt_bsz} \
