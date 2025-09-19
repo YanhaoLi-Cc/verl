@@ -17,6 +17,7 @@ This trainer supports model-agonistic model initialization with huggingface
 """
 import os
 import uuid
+import json
 from collections import defaultdict
 from copy import deepcopy
 from pprint import pprint
@@ -155,6 +156,120 @@ class RayConstraintTrainer(RayPPOTrainer):
 
         return metric_dict
 
+    def _validate_with_save(self, output_path):
+        """
+        执行验证，并按 question_id 保存每个样本的多个生成响应及其准确率。
+        指标计算将按 data_source 分组。
+        """
+        print("Validation with Save: Generation Begin.")
+        
+        # 修改数据结构以存储 data_source
+        # results_by_question 的结构将变为:
+        # {
+        #   "qid1": {"data_source": "source_A", "responses": [{"response": "...", "acc": 1.0}, ...]},
+        #   "qid2": {"data_source": "source_B", "responses": [{"response": "...", "acc": 0.0}, ...]}
+        # }
+        results_by_question = {}
+
+
+        for test_data in self.val_dataloader:
+            test_batch = DataProto.from_single_dict(test_data)
+
+            if self.config.reward_model.enable and test_batch[0].non_tensor_batch['reward_model']['style'] == 'model':
+                print("Skipping validation for model-based reward model.")
+                continue
+
+            n_val_samples = self.config.actor_rollout_ref.rollout.val_kwargs.n
+            repeated_batch = test_batch.repeat(repeat_times=n_val_samples, interleave=True)
+            
+            gen_batch = repeated_batch.pop(['input_ids', 'attention_mask', 'position_ids'])
+            gen_batch.meta_info = {
+                "eos_token_id": self.tokenizer.eos_token_id,
+                "pad_token_id": self.tokenizer.pad_token_id,
+                "recompute_log_prob": False,
+                "do_sample": self.config.actor_rollout_ref.rollout.val_kwargs.do_sample,
+                "validate": True,
+            }
+
+            gen_batch_padded, pad_size = pad_dataproto_to_divisor(gen_batch, self.actor_rollout_wg.world_size)
+            output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(gen_batch_padded)
+            output_gen_batch = unpad_dataproto(output_gen_batch_padded, pad_size=pad_size)
+
+            final_batch = repeated_batch.union(output_gen_batch)
+            
+            reward_result = self.val_reward_fn(final_batch, return_dict=True)
+            accuracies = reward_result["reward_extra_info"]["acc"]
+
+            # --- 新增: 提取 question_id 和 data_source ---
+            question_ids = final_batch.non_tensor_batch.get('question_id')
+            # 假设每个样本都有 data_source，如果没有则提供默认值 'unknown'
+            data_sources = final_batch.non_tensor_batch.get('data_source', ['unknown'] * len(question_ids))
+            
+            response_ids = output_gen_batch.batch['responses']
+            
+            for i in range(len(question_ids)):
+                qid = question_ids[i]
+                source = data_sources[i]
+                acc = accuracies[i]
+            
+                response_text = self.tokenizer.decode(response_ids[i], skip_special_tokens=True)
+                
+                # --- 修改: 更新数据保存结构 ---
+                # 如果是第一次遇到这个 qid，则初始化其条目
+                if qid not in results_by_question:
+                    results_by_question[qid] = {
+                        "data_source": source,
+                        "responses": []
+                    }
+                
+                # 将结果添加到字典中
+                results_by_question[qid]["responses"].append({
+                    "response": response_text.strip(),
+                    "acc": float(acc)
+                })
+
+        print('Validation with Save: Generation end.')
+
+        print(f"Saving validation results to {output_path}...")
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(results_by_question, f, ensure_ascii=False, indent=4)
+        print("Save complete.")
+
+        # --- 修改: 计算并返回指标以用于日志记录 (与 _validate 逻辑对齐) ---
+        data_source_reward = defaultdict(list)
+        data_source_response_lengths = defaultdict(list)
+
+        # 从已保存的结果中收集数据
+        for qid, data in results_by_question.items():
+            source = data['data_source']
+            for res in data['responses']:
+                data_source_reward[source].append(res['acc'])
+                data_source_response_lengths[source].append(len(res['response']))
+
+        metric_dict = {}
+        test_score_vals = []
+        test_length_vals = []
+
+        # 计算每个 data_source 的平均准确率
+        for data_source, rewards in data_source_reward.items():
+            mean_reward = np.mean(rewards)
+            metric_dict[f'val/test_score/{data_source}'] = mean_reward
+            test_score_vals.append(mean_reward)
+
+        # 计算每个 data_source 的平均长度
+        for data_source, lengths in data_source_response_lengths.items():
+            mean_length = np.mean(lengths)
+            metric_dict[f'val/test_length/{data_source}'] = mean_length
+            test_length_vals.append(mean_length)
+
+        # 计算总体平均准确率和长度
+        if test_score_vals:
+            metric_dict['result/avg_acc'] = np.mean(test_score_vals)
+        if test_length_vals:
+            metric_dict['result/avg_len'] = np.mean(test_length_vals)
+
+        return metric_dict
+
     def fit(self):
         """
         The training loop of PPO.
@@ -183,7 +298,11 @@ class RayConstraintTrainer(RayPPOTrainer):
         # perform validation before training
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
-            val_metrics = self._validate()
+            if self.config.trainer.get("val_only", False):
+                print(f"Validation only, val_save_path: {self.config.trainer.val_save_path}")
+                val_metrics = self._validate_with_save(self.config.trainer.val_save_path)
+            else:
+                val_metrics = self._validate()
             assert val_metrics, f"{val_metrics=}"
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
