@@ -154,15 +154,23 @@ class RayConstraintTrainer(RayPPOTrainer):
         指标计算将按 data_source 分组。
         """
         print("Validation with Save: Generation Begin.")
-        
+
         # 修改数据结构以存储 data_source
         # results_by_question 的结构将变为:
         # {
-        #   "qid1": {"data_source": "source_A", "responses": [{"response": "...", "acc": 1.0}, ...]},
-        #   "qid2": {"data_source": "source_B", "responses": [{"response": "...", "acc": 0.0}, ...]}
+        #   "qid1": {"data_source": "source_A", "responses": [{"response": "...", "acc": 1.0, "tokens": 123}, ...]},
+        #   "qid2": {"data_source": "source_B", "responses": [{"response": "...", "acc": 0.0, "tokens": 456}, ...]}
         # }
         results_by_question = {}
 
+        # Calculate total samples for progress bar
+        total_samples = 0
+        for test_data in self.val_dataloader:
+            test_batch = DataProto.from_single_dict(test_data)
+            total_samples += len(test_batch)
+
+        # Create progress bar with total sample count
+        pbar = tqdm(total=total_samples, desc="Validating samples")
 
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
@@ -173,7 +181,7 @@ class RayConstraintTrainer(RayPPOTrainer):
 
             n_val_samples = self.config.actor_rollout_ref.rollout.val_kwargs.n
             repeated_batch = test_batch.repeat(repeat_times=n_val_samples, interleave=True)
-            
+
             gen_batch = repeated_batch.pop(['input_ids', 'attention_mask', 'position_ids'])
             gen_batch.meta_info = {
                 "eos_token_id": self.tokenizer.eos_token_id,
@@ -188,7 +196,7 @@ class RayConstraintTrainer(RayPPOTrainer):
             output_gen_batch = unpad_dataproto(output_gen_batch_padded, pad_size=pad_size)
 
             final_batch = repeated_batch.union(output_gen_batch)
-            
+
             reward_result = self.val_reward_fn(final_batch, return_dict=True)
             accuracies = reward_result["reward_extra_info"]["acc"]
 
@@ -196,16 +204,21 @@ class RayConstraintTrainer(RayPPOTrainer):
             question_ids = final_batch.non_tensor_batch.get('question_id')
             # 假设每个样本都有 data_source，如果没有则提供默认值 'unknown'
             data_sources = final_batch.non_tensor_batch.get('data_source', ['unknown'] * len(question_ids))
-            
+
             response_ids = output_gen_batch.batch['responses']
-            
+
+            # 计算实际的 token 长度（参考 obtain_reponse_length）
+            prompt_length = output_gen_batch.batch['prompts'].shape[-1]
+            response_lengths = output_gen_batch.batch['attention_mask'][:, prompt_length:].sum(1).numpy()
+
             for i in range(len(question_ids)):
                 qid = question_ids[i]
                 source = data_sources[i]
                 acc = accuracies[i]
-            
+                token_length = int(response_lengths[i])
+
                 response_text = self.tokenizer.decode(response_ids[i], skip_special_tokens=True)
-                
+
                 # --- 修改: 更新数据保存结构 ---
                 # 如果是第一次遇到这个 qid，则初始化其条目
                 if qid not in results_by_question:
@@ -213,18 +226,31 @@ class RayConstraintTrainer(RayPPOTrainer):
                         "data_source": source,
                         "responses": []
                     }
-                
-                # 将结果添加到字典中
+
+                # 将结果添加到字典中，包含 tokens 字段
                 results_by_question[qid]["responses"].append({
                     "response": response_text.strip(),
-                    "acc": float(acc)
+                    "acc": float(acc),
+                    "tokens": token_length
                 })
 
+            # Update progress bar
+            pbar.update(len(test_batch))
+
+        pbar.close()
         print('Validation with Save: Generation end.')
 
-        print(f"Saving validation results to {output_path}...")
+        # 修改为 JSONL 格式保存
+        print(f"Saving validation results to {output_path} (JSONL format)...")
         with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(results_by_question, f, ensure_ascii=False, indent=4)
+            for qid, data in results_by_question.items():
+                # 每个 question_id 作为一行
+                json_line = json.dumps({
+                    "question_id": qid,
+                    "data_source": data["data_source"],
+                    "responses": data["responses"]
+                }, ensure_ascii=False)
+                f.write(json_line + '\n')
         print("Save complete.")
 
         # --- 修改: 计算并返回指标以用于日志记录 (与 _validate 逻辑对齐) ---
@@ -236,7 +262,8 @@ class RayConstraintTrainer(RayPPOTrainer):
             source = data['data_source']
             for res in data['responses']:
                 data_source_reward[source].append(res['acc'])
-                data_source_response_lengths[source].append(len(res['response']))
+                # 使用实际的 token 长度而不是字符串长度
+                data_source_response_lengths[source].append(res['tokens'])
 
         metric_dict = {}
         test_score_vals = []
