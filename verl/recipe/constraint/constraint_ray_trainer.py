@@ -152,6 +152,7 @@ class RayConstraintTrainer(RayPPOTrainer):
         """
         执行验证，并按 question_id 保存每个样本的多个生成响应及其准确率。
         指标计算将按 data_source 分组。
+        支持 resume 功能：如果输出文件已存在，将跳过已处理的 question_ids。
         """
         print("Validation with Save: Generation Begin.")
 
@@ -162,14 +163,44 @@ class RayConstraintTrainer(RayPPOTrainer):
         #   "qid2": {"data_source": "source_B", "responses": [{"response": "...", "acc": 0.0, "tokens": 456}, ...]}
         # }
         results_by_question = {}
+        processed_qids = set()  # 存储已处理的 question_ids
 
-        # Calculate total samples for progress bar
+        # 检查输出文件是否存在，如果存在则读取已处理的 question_ids
+        if os.path.exists(output_path):
+            print(f"Found existing results file: {output_path}")
+            print("Loading processed question_ids for resume...")
+            with open(output_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        data = json.loads(line.strip())
+                        qid = data["question_id"]
+                        processed_qids.add(qid)
+                        # 将已有数据加载到内存中，用于后续的指标计算
+                        results_by_question[qid] = {
+                            "data_source": data["data_source"],
+                            "responses": data["responses"]
+                        }
+                    except json.JSONDecodeError:
+                        continue
+            print(f"Found {len(processed_qids)} already processed question_ids.")
+
+        # Calculate total samples for progress bar (excluding already processed ones)
         total_samples = 0
+        skipped_samples = 0
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
-            total_samples += len(test_batch)
+            # 检查这个 batch 中有多少需要处理
+            if 'question_id' in test_batch.non_tensor_batch:
+                batch_qids = test_batch.non_tensor_batch.get('question_id')
+                unprocessed_in_batch = sum(1 for qid in batch_qids if qid not in processed_qids)
+                total_samples += unprocessed_in_batch
+                skipped_samples += len(batch_qids) - unprocessed_in_batch
+            else:
+                total_samples += len(test_batch)
 
-        # Create progress bar with total sample count
+        print(f"Total samples to process: {total_samples} (skipping {skipped_samples} already processed)")
+
+        # Create progress bar with actual samples to process
         pbar = tqdm(total=total_samples, desc="Validating samples")
 
         for test_data in self.val_dataloader:
@@ -178,6 +209,19 @@ class RayConstraintTrainer(RayPPOTrainer):
             if self.config.reward_model.enable and test_batch[0].non_tensor_batch['reward_model']['style'] == 'model':
                 print("Skipping validation for model-based reward model.")
                 continue
+
+            # 检查 batch 中的 question_ids，过滤出需要处理的样本
+            if 'question_id' in test_batch.non_tensor_batch:
+                batch_qids = test_batch.non_tensor_batch.get('question_id')
+                # 找出需要处理的样本索引
+                indices_to_process = [i for i, qid in enumerate(batch_qids) if qid not in processed_qids]
+
+                if not indices_to_process:
+                    # 整个 batch 都已处理过，跳过
+                    continue
+
+                # 只保留需要处理的样本
+                test_batch = test_batch[indices_to_process]
 
             n_val_samples = self.config.actor_rollout_ref.rollout.val_kwargs.n
             repeated_batch = test_batch.repeat(repeat_times=n_val_samples, interleave=True)
@@ -211,6 +255,8 @@ class RayConstraintTrainer(RayPPOTrainer):
             prompt_length = output_gen_batch.batch['prompts'].shape[-1]
             response_lengths = output_gen_batch.batch['attention_mask'][:, prompt_length:].sum(1).numpy()
 
+            new_results_for_save = {}  # 存储这个 batch 的新结果
+
             for i in range(len(question_ids)):
                 qid = question_ids[i]
                 source = data_sources[i]
@@ -226,6 +272,11 @@ class RayConstraintTrainer(RayPPOTrainer):
                         "data_source": source,
                         "responses": []
                     }
+                    # 标记为需要保存的新结果
+                    new_results_for_save[qid] = {
+                        "data_source": source,
+                        "responses": []
+                    }
 
                 # 将结果添加到字典中，包含 tokens 字段
                 results_by_question[qid]["responses"].append({
@@ -234,24 +285,33 @@ class RayConstraintTrainer(RayPPOTrainer):
                     "tokens": token_length
                 })
 
+                # 如果是新结果，也添加到待保存列表
+                if qid in new_results_for_save:
+                    new_results_for_save[qid]["responses"].append({
+                        "response": response_text.strip(),
+                        "acc": float(acc),
+                        "tokens": token_length
+                    })
+
+            # 实时追加新结果到文件（避免程序中断丢失数据）
+            if new_results_for_save:
+                with open(output_path, 'a', encoding='utf-8') as f:
+                    for qid, data in new_results_for_save.items():
+                        json_line = json.dumps({
+                            "question_id": qid,
+                            "data_source": data["data_source"],
+                            "responses": data["responses"]
+                        }, ensure_ascii=False)
+                        f.write(json_line + '\n')
+
             # Update progress bar
             pbar.update(len(test_batch))
 
         pbar.close()
         print('Validation with Save: Generation end.')
 
-        # 修改为 JSONL 格式保存
-        print(f"Saving validation results to {output_path} (JSONL format)...")
-        with open(output_path, 'w', encoding='utf-8') as f:
-            for qid, data in results_by_question.items():
-                # 每个 question_id 作为一行
-                json_line = json.dumps({
-                    "question_id": qid,
-                    "data_source": data["data_source"],
-                    "responses": data["responses"]
-                }, ensure_ascii=False)
-                f.write(json_line + '\n')
-        print("Save complete.")
+        # 不再需要在最后保存，因为已经实时保存了
+        print(f"Validation results saved to {output_path} (JSONL format)")
 
         # --- 修改: 计算并返回指标以用于日志记录 (与 _validate 逻辑对齐) ---
         data_source_reward = defaultdict(list)

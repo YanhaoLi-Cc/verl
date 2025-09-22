@@ -6,7 +6,7 @@ set -x
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export HYDRA_FULL_ERROR=1
 export RAY_PORT=6379
-export WANDB_API_KEY='INSERT WANDB API KEY HERE'
+export WANDB_API_KEY='sk'
 eval $(curl -fsSL proxy.msh.work:3128/env --noproxy proxy.msh.work)
 
 cd /mnt/moonfs/liyanhao-ksyun/codebase/verl/
@@ -42,7 +42,7 @@ loss_agg_mode="token-mean"
 # Adjusted batch sizes for single node 8 GPUs
 train_prompt_bsz=64 # Reduced from 512 to 64 for single node
 gen_prompt_bsz=64
-val_prompt_bsz=64
+val_prompt_bsz=2048
 n_resp_per_prompt=8
 train_prompt_mini_bsz=32
 filter_groups_enable=False
@@ -51,9 +51,10 @@ max_num_gen_batches=5
 
 # Paths
 MODEL_PATH=${MODEL_PATH:-"/mnt/moonfs/liyanhao-ksyun/codebase/verl/models/Qwen3-4B-Thinking-32k-to-8k-lr005-init020-step70"}
+# MODEL_PATH=${MODEL_PATH:-"/mnt/moonfs/liyanhao-ksyun/models/Qwen/Qwen3-4B-Thinking-2507"}
 CKPTS_DIR=${CKPTS_DIR:-"/mnt/moonfs/liyanhao-ksyun/codebase/verl/train_results/${project_name}/${exp_name}"}
 TRAIN_FILES="['/mnt/moonfs/liyanhao-ksyun/codebase/verl/dataset/train_data/4k_high_quality_deepmath.parquet']"
-SAVE_PATH='/mnt/moonfs/liyanhao-ksyun/codebase/verl/eval_result/Qwen3-4B-Thinking-32k-to-8k-lr005-init020-step70-T0.json'
+SAVE_PATH='/mnt/moonfs/liyanhao-ksyun/codebase/verl/eval_result/Qwen3-4B-Thinking-32k-to-8k-lr005-init020-step70-T0.jsonl'
 
 # Algorithm
 temperature=1.0
@@ -88,7 +89,7 @@ val_temperature=0.6
 val_top_p=0.95
 val_top_k=-1
 
-
+#     data.val_files='['$aime24_32','$aime25_32','$hmmt25_32', '$gpqa', '$mmlu_pro']' \
 python3 -m recipe.constraint.main_dapo \
     +trainer.val_save_path=${SAVE_PATH} \
     +trainer.val_only=True \
@@ -170,7 +171,7 @@ python3 -m recipe.constraint.main_dapo \
     trainer.project_name="${project_name}" \
     trainer.experiment_name="${exp_name}" \
     trainer.n_gpus_per_node=8 \
-    trainer.nnodes=1 \
+    trainer.nnodes=8 \
     trainer.test_freq=10 \
     trainer.save_freq=10 \
     trainer.total_epochs=5 \
