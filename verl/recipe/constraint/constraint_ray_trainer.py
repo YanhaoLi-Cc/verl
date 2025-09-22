@@ -56,19 +56,11 @@ class RayConstraintTrainer(RayPPOTrainer):
             constraint_config = self.config.algorithm.constraint_config
             self.constraint_manager = ConstraintRewardManager(
                 target_length=constraint_config.target_length,
-                tolerance=constraint_config.tolerance,
                 lambda_init=constraint_config.lambda_init,
                 lambda_lr=constraint_config.lambda_lr,
                 lambda_max=constraint_config.lambda_max,
                 lambda_min=constraint_config.lambda_min,
-                ema_alpha=constraint_config.ema_alpha,
-                momentum_beta=constraint_config.momentum_beta,
                 constraint_type=constraint_config.constraint_type,
-                enable_adaptive_tolerance=constraint_config.get("enable_adaptive_tolerance", False),
-                adaptive_tolerance_factor=constraint_config.get("adaptive_tolerance_factor", 0.1),
-                # Pass batch information for precise window calculation
-                batch_size=self.config.data.train_batch_size,
-                n_responses_per_prompt=self.config.actor_rollout_ref.rollout.n,
             )
             if self.constraint_manager is not None:
                 print("\033[91mLoad ConstrainedRewardManager Successful\033[0m")

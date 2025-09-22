@@ -30,24 +30,15 @@ algorithm:
   constraint_config:
     # Target length configuration
     target_length: 4096  # Target average response length
-    tolerance: 0.125    # Tolerance ratio (0.125 = 12.5% deviation allowed)
     
     # Lagrange multiplier settings
-    lambda_init: 0.01   # Initial value of Lagrange multiplier (adjusted for ratio-based)
-    lambda_lr: 0.02     # Learning rate for lambda updates (conservative for stability)
+    lambda_init: 0.01   # Initial value of Lagrange multiplier
+    lambda_lr: 0.02     # Learning rate for lambda updates
     lambda_max: 2.0     # Maximum value for lambda (matches reward scale [-1, 1])
     lambda_min: 0.0     # Minimum value for lambda
     
-    # Stability parameters
-    ema_alpha: 0.95     # EMA coefficient for constraint violation smoothing
-    momentum_beta: 0.9  # Momentum coefficient for lambda updates
-    
     # Constraint type
     constraint_type: "average"  # "average" or "max" - which metric to constrain
-    
-    # Adaptive tolerance (optional)
-    enable_adaptive_tolerance: False
-    adaptive_tolerance_factor: 0.1
 
 trainer:
   project_name: verl-constrain
