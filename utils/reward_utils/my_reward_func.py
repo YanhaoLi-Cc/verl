@@ -234,7 +234,7 @@ def reward_func_signal(data_source, solution_str, ground_truth, extra_info=None,
             else:
                 gold_boxed = parse(f"\\boxed{{{ground_truth}}}")
                 mathv_correct = verify(gold_boxed, mathv_pred) if gold_boxed is not None else False
-
+                
     except TimeoutException as e:
         print(f"整个 reward function 超时 (>{timeout_seconds}s): {e}")
         omi_correct = False
@@ -255,6 +255,5 @@ def reward_func_signal(data_source, solution_str, ground_truth, extra_info=None,
         }
     }
 
-    
 if __name__ == "__main__":
     print(my_reward_func("_", "asdada\\boxed{3/2}", "1.50", None))
